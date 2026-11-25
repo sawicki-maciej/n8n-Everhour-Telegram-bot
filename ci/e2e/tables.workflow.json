@@ -1,0 +1,130 @@
+{
+  "id": "ci-tables",
+  "name": "CI: create data tables",
+  "nodes": [
+    {
+      "id": "t1",
+      "name": "Start",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "ci-create-tables",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ci-create-tables",
+        "responseMode": "lastNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "t2",
+      "name": "Create everhour_reminders",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "everhour_reminders",
+        "columns": {
+          "column": [
+            {
+              "name": "date",
+              "type": "string"
+            },
+            {
+              "name": "status",
+              "type": "string"
+            },
+            {
+              "name": "hours",
+              "type": "number"
+            },
+            {
+              "name": "pings",
+              "type": "number"
+            },
+            {
+              "name": "note",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "createIfNotExists": true
+        }
+      }
+    },
+    {
+      "id": "t3",
+      "name": "Create invoice_reminders",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "invoice_reminders",
+        "columns": {
+          "column": [
+            {
+              "name": "period",
+              "type": "string"
+            },
+            {
+              "name": "status",
+              "type": "string"
+            },
+            {
+              "name": "pings",
+              "type": "number"
+            },
+            {
+              "name": "note",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "createIfNotExists": true
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Create everhour_reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create everhour_reminders": {
+      "main": [
+        [
+          {
+            "node": "Create invoice_reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

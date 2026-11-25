@@ -1,0 +1,2658 @@
+{
+  "name": "Everhour Hours Reminder + Telegram Logger",
+  "nodes": [
+    {
+      "id": "id1",
+      "name": "Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -480,
+        -520
+      ],
+      "parameters": {
+        "content": "## Everhour: przypomnienia + logowanie z Telegrama\n\n**Uruchomienie** (szczegóły w README)\n1. Data tables: utwórz **everhour_reminders** (date: string, status: string, hours: number, pings: number, note: string) i **invoice_reminders** (period: string, status: string, pings: number, note: string). Nazwy muszą się zgadzać co do znaku.\n2. Credential **Everhour API key** (Header Auth): Name = `X-Api-Key`, Value = klucz API z Everhour (profil użytkownika, na dole strony). Wybierz go we wszystkich node’ach „Everhour: …”.\n3. @BotFather → `/newbot` → token wklej w credential Telegram API i wybierz go w node’ach Telegrama.\n4. Opublikuj workflow, napisz do bota `/start`, wklej chat_id w **Config** → TELEGRAM_CHAT_ID, opublikuj ponownie.\n5. `/status` w bocie: strefa czasowa z profilu Everhour + polityka blokady + ostatnie 7 dni.\n\n**Config**: MIN_HOURS / MAX_HOURS = zakres, w którym dzień jest „w porządku”; LOCK_DAYS = po ilu dniach Everhour blokuje edycję; EVERHOUR_TASK_ID = task do logowania (puste = task z największą liczbą godzin w ostatnich 14 dniach); INVOICE_REMINDERS = false wyłącza przypomnienia o fakturze.\n\n**Raporty**: `/tydzien` i `/raport` (domyślnie poprzedni miesiąc). Suma = wiersz użytkownika z Everhour `GET /dashboards/users` bez przeliczeń; projekty z `/dashboards/projects` tylko gdy sumują się do tej wartości. Rozbicie na dni (tylko tydzień) z wpisów czasu.\n\n**Zasady**: pn–pt robocze, sob–nd wolne. Dzień wolny = „Wolne” / „0” w bocie (też zakres: „0 do piątku”).\nHarmonogram (Europe/Warsaw): codziennie 9:30, 14:00 i 21:30. Everhour: 9:30 pn–sob, 14:00 i 21:30 wt–sob; sprawdza wczoraj, w sobotę piątek (w poniedziałek piątek jest już zablokowany).\n\n**Faktura**: termin = ostatni pn–pt miesiąca. Dzień wcześniej 9:30, od terminu każdy przebieg, aż „wystawiona” (tekst albo przycisk). Stan: Data table **invoice_reminders**.\nStan przypomnień Everhour: Data table **everhour_reminders**.",
+        "height": 820,
+        "width": 680,
+        "color": 4
+      }
+    },
+    {
+      "id": "id2",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 9 * * *"
+            },
+            {
+              "field": "cronExpression",
+              "expression": "0 14 * * *"
+            },
+            {
+              "field": "cronExpression",
+              "expression": "30 21 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "id3",
+      "name": "Manual test",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "id4",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ],
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "webhookId": "5ead4015-5a4f-4814-bd6d-23d08132559c",
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Telegram: Everhour bot"
+        }
+      }
+    },
+    {
+      "id": "id11",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        200
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "include": "all",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id5",
+              "name": "TELEGRAM_CHAT_ID",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "id6",
+              "name": "MIN_HOURS",
+              "type": "number",
+              "value": 6
+            },
+            {
+              "id": "id7",
+              "name": "MAX_HOURS",
+              "type": "number",
+              "value": 10
+            },
+            {
+              "id": "id8",
+              "name": "LOCK_DAYS",
+              "type": "number",
+              "value": 2
+            },
+            {
+              "id": "id9",
+              "name": "EVERHOUR_TASK_ID",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "id10",
+              "name": "INVOICE_REMINDERS",
+              "type": "boolean",
+              "value": true
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "id13",
+      "name": "Is Telegram update?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "id12",
+              "leftValue": "={{ $json.update_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "id14",
+      "name": "Compute target day",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Target = yesterday in Europe/Warsaw. Mon-Fri are workdays, Sat-Sun are off.\n// test_now can be pinned on the \"Manual test\" trigger to simulate a run time.\nconst ZONE = 'Europe/Warsaw';\nconst cfg = $('Config').first().json;\nconst now = cfg.test_now\n  ? DateTime.fromISO(String(cfg.test_now), { zone: ZONE })\n  : DateTime.now().setZone(ZONE);\n// The schedule fires every day at 9:30, 14:00 and 21:30 (invoice reminders need every day).\n// The Everhour check keeps its own rhythm: 9:30 Mon-Sat, 14:00 and 21:30 Tue-Sat.\nconst ehRun = now.hour < 12 ? now.weekday <= 6 : (now.weekday >= 2 && now.weekday <= 6);\nif (!ehRun) return [];\nconst lockDays = Math.max(1, Number(cfg.LOCK_DAYS) || 2);\nconst target = now.minus({ days: 1 }).startOf('day');\n\nreturn [{\n  json: {\n    now: now.toISO(),\n    today: now.toISODate(),\n    target: target.toISODate(),\n    isWorkday: target.weekday <= 5,\n    slot: now.hour < 12 ? 'morning' : (now.hour < 18 ? 'afternoon' : 'evening'),\n    oldestEditable: now.minus({ days: lockDays - 1 }).toISODate(),\n    from: target.minus({ days: 35 }).toISODate(),\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "id15",
+      "name": "Get reminder state",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        0
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "everhour_reminders"
+        },
+        "matchType": "anyCondition",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "date",
+              "condition": "eq",
+              "keyValue": "={{ $json.target }}"
+            },
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "pending"
+            }
+          ]
+        },
+        "returnAll": true,
+        "orderBy": false
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "id16",
+      "name": "Everhour: me (check)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.everhour.com/users/me",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": false,
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Everhour API key"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "id17",
+      "name": "Everhour: time (check)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.everhour.com/users/{{ $json.body && $json.body.id ? $json.body.id : 'me' }}/time",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "from",
+              "value": "={{ $('Compute target day').first().json.from }}"
+            },
+            {
+              "name": "to",
+              "value": "={{ $('Compute target day').first().json.target }}"
+            },
+            {
+              "name": "limit",
+              "value": "1000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Everhour API key"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "id18",
+      "name": "Decide reminders",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Decide what to send for the target day and for pending days that got locked.\n// Fail-open: if Everhour cannot be read, remind anyway.\nconst ZONE = 'Europe/Warsaw';\nconst DAYS = ['poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota', 'niedziela'];\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst label = (iso) => {\n  const d = DateTime.fromISO(iso, { zone: ZONE });\n  return `${DAYS[d.weekday - 1]} ${d.day}.${String(d.month).padStart(2, '0')}`;\n};\nconst fmtH = (h) => String(Math.round(h * 100) / 100).replace('.', ',');\nconst errText = (res) => {\n  if (!res) return 'brak odpowiedzi';\n  if (res.error) return String(res.error.message || res.error).slice(0, 200);\n  const b = res.body;\n  const msg = b && typeof b === 'object' ? (b.message || b.error || JSON.stringify(b)) : String(b ?? '');\n  return `HTTP ${res.statusCode ?? '?'}${msg ? ': ' + msg : ''}`.slice(0, 200);\n};\n\nconst cfg = $('Config').first().json;\nconst t = $('Compute target day').first().json;\nconst chatId = String(cfg.TELEGRAM_CHAT_ID ?? '').trim();\nif (!chatId) {\n  throw new Error('Config: TELEGRAM_CHAT_ID is empty. Send /start to the bot and paste the chat_id into Config.');\n}\nconst MIN = Number(cfg.MIN_HOURS) || 6;\nconst MAX = Number(cfg.MAX_HOURS) || 10;\n\n// Reminder state (DataTable)\nconst stateRows = $('Get reminder state').all().map((i) => i.json)\n  .filter((r) => r && typeof r.date === 'string' && r.date);\nconst st = stateRows.find((r) => r.date === t.target) || null;\n\n// Everhour\nconst meRes = $('Everhour: me (check)').first().json;\nconst timeRes = $('Everhour: time (check)').first().json;\nconst meOk = Boolean(meRes && meRes.statusCode === 200 && meRes.body && meRes.body.id);\nconst ehOk = meOk && Boolean(timeRes && timeRes.statusCode === 200 && Array.isArray(timeRes.body));\nconst ehError = !meOk ? errText(meRes) : (ehOk ? '' : errText(timeRes));\nconst records = ehOk ? timeRes.body.filter((r) => r && r.date) : [];\nconst secondsOn = (iso) => records.filter((r) => r.date === iso).reduce((s, r) => s + (Number(r.time) || 0), 0);\nconst cfgTask = String(cfg.EVERHOUR_TASK_ID ?? '').trim();\n// Main task = most time in the 14 days before the day (one-off HR/meeting entries do not win)\nconst mainTask = (list, beforeIso) => {\n  const since = DateTime.fromISO(beforeIso, { zone: ZONE }).minus({ days: 14 }).toISODate();\n  const withTask = list.filter((x) => x.task && x.task.id);\n  const recent = withTask.filter((x) => String(x.date) >= since);\n  const totals = new Map();\n  for (const x of (recent.length ? recent : withTask)) {\n    const id = String(x.task.id);\n    const e = totals.get(id) || { id, name: x.task.name, sec: 0, last: '' };\n    e.sec += Number(x.time) || 0;\n    if (String(x.date) > e.last) e.last = String(x.date);\n    totals.set(id, e);\n  }\n  return [...totals.values()].sort((a, b) => b.sec - a.sec || b.last.localeCompare(a.last))[0] || null;\n};\nconst auto = mainTask(records, t.target);\nconst taskRec = cfgTask ? records.find((r) => r.task && String(r.task.id) === cfgTask) : null;\nconst taskName = cfgTask ? (taskRec ? taskRec.task.name : cfgTask) : (auto ? auto.name : '');\n\nconst out = [];\nconst DONE = ['logged', 'day_off', 'ok', 'missed'];\n\n// 1) Days still pending that are now outside the edit window\nfor (const r of stateRows) {\n  if (r.status !== 'pending' || r.date >= t.oldestEditable) continue;\n  const pings = Number(r.pings) || 0;\n  if (r.date < t.from) {\n    out.push({ route: 'none', state: { date: r.date, status: 'missed', hours: 0, pings, note: 'stale' } });\n    continue;\n  }\n  if (!ehOk) continue; // verify on a later run\n  const sec = secondsOn(r.date);\n  if (sec > 0) {\n    out.push({ route: 'none', state: { date: r.date, status: 'logged', hours: sec / 3600, pings, note: 'logged outside bot' } });\n  } else {\n    out.push({\n      route: 'plain',\n      chatId,\n      text: `Everhour: <b>${label(r.date)}</b> został bez godzin, a edycja jest już zablokowana. Poproś administratora Everhoura w firmie o odblokowanie albo dopisanie godzin.`,\n      state: { date: r.date, status: 'missed', hours: 0, pings, note: 'locked without entry' },\n    });\n  }\n}\n\n// 2) Target day (yesterday)\nif (t.isWorkday && !(st && DONE.includes(st.status))) {\n  const pings = st ? Number(st.pings) || 0 : 0;\n  const sec = secondsOn(t.target);\n  const h = sec / 3600;\n  const prefix = t.slot === 'evening' ? 'Ostatnie przypomnienie. ' : (t.slot === 'afternoon' ? 'Przypominam. ' : '');\n  const lockLine = t.slot === 'evening' ? 'O północy ten dzień się zablokuje.' : 'Edycja tego dnia działa do dzisiejszej północy.';\n  const tag = `\\n<code>${t.target}</code>`;\n  const day = `<b>${label(t.target)}</b>`;\n\n  if (!ehOk) {\n    out.push({\n      route: 'button', chatId, buttonText: 'Wolne', buttonData: `off|${t.target}`,\n      text: `${prefix}Nie mogę sprawdzić Everhoura (${esc(ehError)}). Upewnij się, że ${day} jest zalogowany. Możesz też odpisać liczbę godzin, spróbuję wpisać.${tag}`,\n      state: { date: t.target, status: 'pending', hours: 0, pings: pings + 1, note: 'everhour check failed' },\n    });\n  } else if (sec === 0) {\n    out.push({\n      route: 'button', chatId, buttonText: 'Wolne', buttonData: `off|${t.target}`,\n      text: `${prefix}Brak godzin w Everhourze za ${day}.\\nOdpisz, ile wpisać (np. 8, 7,5 albo 7:30)${taskName ? `, zaloguję na „${esc(taskName)}”` : ''}.\\n${lockLine}${tag}`,\n      state: { date: t.target, status: 'pending', hours: 0, pings: pings + 1, note: 'missing' },\n    });\n  } else if (h < MIN || h > MAX) {\n    out.push({\n      route: 'button', chatId, buttonText: 'OK, zostaw', buttonData: `ok|${t.target}`,\n      text: `${prefix}Za ${day} masz w Everhourze ${h < MIN ? 'tylko' : 'aż'} ${fmtH(h)} h.\\nJeśli tak ma być, kliknij „OK, zostaw”. Jeśli nie, odpisz łączną liczbę godzin za ten dzień.\\n${lockLine}${tag}`,\n      state: { date: t.target, status: 'pending', hours: h, pings: pings + 1, note: h < MIN ? 'low' : 'high' },\n    });\n  } else if (st && st.status === 'pending') {\n    out.push({ route: 'none', state: { date: t.target, status: 'logged', hours: h, pings, note: 'logged outside bot' } });\n  }\n}\n\nreturn out.map((json) => ({ json }));\n"
+      }
+    },
+    {
+      "id": "id19",
+      "name": "Save reminder state",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1920,
+        -140
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "everhour_reminders"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "date",
+              "condition": "eq",
+              "keyValue": "={{ $json.state.date }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $json.state.date }}",
+            "status": "={{ $json.state.status }}",
+            "hours": "={{ $json.state.hours }}",
+            "pings": "={{ $json.state.pings }}",
+            "note": "={{ $json.state.note }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hours",
+              "displayName": "hours",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pings",
+              "displayName": "pings",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "id22",
+      "name": "Route reminder",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1920,
+        60
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "id20",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "button",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "button"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "id21",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "plain",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "plain"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "id23",
+      "name": "Send reminder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2160,
+        -20
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.text }}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "={{ $json.buttonText }}",
+                    "additionalFields": {
+                      "callback_data": "={{ $json.buttonData }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Telegram: Everhour bot"
+        }
+      }
+    },
+    {
+      "id": "id24",
+      "name": "Send notice",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2160,
+        160
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.text }}",
+        "replyMarkup": "none",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Telegram: Everhour bot"
+        }
+      }
+    },
+    {
+      "id": "id25",
+      "name": "Parse update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        480
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Turn a Telegram update (text message or button press) into an intent.\n// Only the chat from Config.TELEGRAM_CHAT_ID is served; others are ignored.\nconst ZONE = 'Europe/Warsaw';\nconst fmtH = (h) => String(Math.round(h * 100) / 100).replace('.', ',');\nconst cfg = $('Config').first().json; // Config passes the Telegram update through\nconst allowed = String(cfg.TELEGRAM_CHAT_ID ?? '').trim();\nconst msg = cfg.message || null;\nconst cb = cfg.callback_query || null;\nconst chat = msg ? msg.chat : (cb && cb.message ? cb.message.chat : null);\nif (!chat || chat.id === undefined || chat.id === null) return [];\nconst chatId = String(chat.id);\n\nconst base = {\n  chatId,\n  isCallback: Boolean(cb),\n  callbackId: cb ? String(cb.id) : '',\n  intent: 'reply',\n  status: '',\n  date: '',\n  until: '',\n  hours: 0,\n  seconds: 0,\n  comment: '',\n  text: '',\n};\nconst reply = (text) => [{ json: { ...base, intent: 'reply', text } }];\n\nif (!allowed) {\n  return reply(`Bot działa. Twój chat_id: <code>${chatId}</code>\\nWpisz go w node Config (pole TELEGRAM_CHAT_ID) i opublikuj workflow.`);\n}\nif (chatId !== allowed) return [];\n\nconst HELP = [\n  'Pilnuję godzin w Everhourze. Rano, po południu i wieczorem sprawdzam poprzedni dzień roboczy (pn–pt) i piszę, jeśli czegoś brakuje.',\n  '',\n  'Odpowiedź na przypomnienie:',\n  '• liczba godzin, np. 8, 7,5, 7:30 albo 7h30 (łącznie za dzień; tekst po liczbie trafia do komentarza)',\n  '• 0 albo wolne (też urlop, L4): dzień wolny, koniec przypomnień; tekst po nim trafia do notatki, np. „0 L4”',\n  '• ok: zostaw jak jest',\n  '',\n  'Wolne na kilka dni: „0 do piątku”, „L4 do 16.10”, „wolne do jutra”. Liczę od dziś (w odpowiedzi na przypomnienie od jego dnia) i do tego czasu nie przypominam.',\n  'wracam: odwołuje zaplanowane wolne od dziś.',\n  'Bez przypomnienia też możesz napisać liczbę albo 0, zapytam: dziś czy wczoraj.',\n  '',\n  'Komendy:',\n  '/status: profil Everhoura, ostatnie 7 dni i zaplanowane wolne',\n  '/tydzien: godziny w tym tygodniu („/tydzien poprzedni” = zeszły)',\n  '/raport: raport miesięczny z Everhoura, domyślnie za poprzedni miesiąc („/raport bieżący”, „/raport 9”, „/raport wrzesień”, „/raport 2026-09”)',\n  'wystawiona: faktura za miesiąc odhaczona. Termin to ostatni dzień roboczy miesiąca: przypominam dzień wcześniej, a od terminu do skutku.',\n].join('\\n');\n\nconst lastIso = (s) => {\n  const m = String(s || '').match(/\\d{4}-\\d{2}-\\d{2}/g);\n  return m ? m[m.length - 1] : '';\n};\n\n// Reports: totals come from Everhour's own report endpoints, the bot only picks the date range\nconst now0 = DateTime.now().setZone(ZONE);\nconst MONTH_NAMES = ['styczeń', 'luty', 'marzec', 'kwiecień', 'maj', 'czerwiec', 'lipiec', 'sierpień', 'wrzesień', 'październik', 'listopad', 'grudzień'];\nconst dm = (d) => `${d.day}.${String(d.month).padStart(2, '0')}`;\nconst monthReport = (y, m) => {\n  const start = DateTime.fromObject({ year: y, month: m, day: 1 }, { zone: ZONE });\n  if (!start.isValid) return reply('Nie rozpoznaję miesiąca.');\n  if (start > now0) return reply('Ten miesiąc jeszcze się nie zaczął.');\n  return [{\n    json: {\n      ...base, intent: 'report', reportKind: 'month', from: start.toISODate(), to: start.endOf('month').toISODate(),\n      period: `${MONTH_NAMES[m - 1]} ${y}`, running: start.hasSame(now0, 'month'),\n    },\n  }];\n};\n\nif (cb) {\n  const [kind, date = '', val = ''] = String(cb.data || '').split('|');\n  if (kind === 'off') return [{ json: { ...base, intent: 'mark', status: 'day_off', date, comment: val } }];\n  if (kind === 'ok') return [{ json: { ...base, intent: 'mark', status: 'ok', date } }];\n  if (kind === 'log') {\n    const seconds = Number(val);\n    if (!(seconds > 0 && seconds <= 16 * 3600)) return reply('Niepoprawna wartość w przycisku.');\n    return [{ json: { ...base, intent: 'log', date, seconds, hours: seconds / 3600 } }];\n  }\n  if (kind === 'cancel') return reply('OK, nic nie wpisuję.');\n  if (kind === 'inv') return [{ json: { ...base, intent: 'invoice', invoicePeriod: date } }];\n  if (kind === 'rep') {\n    const mm = date.match(/^(\\d{4})-(\\d{2})$/);\n    return mm ? monthReport(Number(mm[1]), Number(mm[2])) : reply('Niepoprawny przycisk raportu.');\n  }\n  return reply('Nie znam tego przycisku.');\n}\n\nconst text = typeof msg.text === 'string' ? msg.text.trim() : '';\nif (!text) return reply('Obsługuję tylko tekst. Odpisz liczbę godzin, np. 8 albo 7:30.');\nconst replyDate = msg.reply_to_message ? lastIso(msg.reply_to_message.text) : '';\nconst cmd = text.toLowerCase().replace(/^(\\/[^\\s@]+)@\\w+/, '$1'); // \"/raport@bot 9\" -> \"/raport 9\"\n\nif (/^\\/(start|help|pomoc)$/.test(cmd)) return reply(HELP);\nif (cmd === '/status') return [{ json: { ...base, intent: 'status' } }];\n\n// Monthly invoice issued: \"wystawiona\", \"wystawiłem\", \"fv wystawiona\" (month from the reminder tag if replying)\nif (/^(?:faktura\\s+|fv\\s+)?(?:wystawiona|wystawione|wystawi[lł]em|wystawi[lł]am)[.!]?$/.test(cmd)) {\n  const tagged = msg.reply_to_message ? (String(msg.reply_to_message.text || '').match(/faktura (\\d{4}-\\d{2})/) || [])[1] : '';\n  return [{ json: { ...base, intent: 'invoice', invoicePeriod: tagged || '' } }];\n}\n\nconst weekCmd = cmd.match(/^\\/(?:tydzien|tydzień|tydz|week)(?:\\s+(.*))?$/);\nif (weekCmd) {\n  const arg = String(weekCmd[1] || '').trim();\n  if (arg && !/^(poprzedni|zesz[lł]y|ubieg[lł]y|-1)$/.test(arg)) return reply('Użyj <code>/tydzien</code> albo <code>/tydzien poprzedni</code>.');\n  const start = now0.startOf('week').minus({ weeks: arg ? 1 : 0 });\n  const end = start.plus({ days: 6 });\n  return [{ json: { ...base, intent: 'report', reportKind: 'week', from: start.toISODate(), to: end.toISODate(), period: `${dm(start)}–${dm(end)}` } }];\n}\nconst monthCmd = cmd.match(/^\\/(?:raport|report|miesiac|miesiąc)(?:\\s+(.*))?$/);\nif (monthCmd) {\n  const a = String(monthCmd[1] || '').trim();\n  const prev = now0.minus({ months: 1 });\n  const guessYear = (mm) => (mm > now0.month ? now0.year - 1 : now0.year);\n  let ym = null;\n  let mt;\n  if (!a || /^(poprzedni|zesz[lł]y|ubieg[lł]y)$/.test(a)) ym = { y: prev.year, m: prev.month };\n  else if (/^(bie[zż][aą]cy|ten|teraz|obecny)$/.test(a)) ym = { y: now0.year, m: now0.month };\n  else if ((mt = a.match(/^(\\d{4})-(\\d{1,2})$/))) ym = { y: Number(mt[1]), m: Number(mt[2]) };\n  else if ((mt = a.match(/^(\\d{1,2})[./-](\\d{4})$/))) ym = { y: Number(mt[2]), m: Number(mt[1]) };\n  else if ((mt = a.match(/^(\\d{1,2})$/))) ym = { y: guessYear(Number(mt[1])), m: Number(mt[1]) };\n  else {\n    const n = a.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/ł/g, 'l');\n    const idx = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paz', 'lis', 'gru'].findIndex((pre) => n.startsWith(pre));\n    if (idx >= 0) {\n      const yy = (n.match(/(\\d{4})/) || [])[1];\n      ym = { y: yy ? Number(yy) : guessYear(idx + 1), m: idx + 1 };\n    }\n  }\n  if (!ym || !(ym.m >= 1 && ym.m <= 12)) {\n    return reply('Nie rozpoznaję miesiąca. Przykłady: <code>/raport</code> (poprzedni), <code>/raport bieżący</code>, <code>/raport 9</code>, <code>/raport wrzesień</code>, <code>/raport 2026-09</code>.');\n  }\n  return monthReport(ym.y, ym.m);\n}\nif (/^(wracam|wróciłem|wrocilem|wróciłam|koniec wolnego)$/.test(cmd)) return [{ json: { ...base, intent: 'resume' } }];\n\nconst parseHours = (s) => {\n  const v = s.replace(/^(\\d+),(\\d+)/, '$1.$2'); // decimal comma, leading number only\n  let m = v.match(/^(\\d{1,2}):([0-5]\\d)(?:\\s+([\\s\\S]*))?$/);\n  if (m) return { hours: Number(m[1]) + Number(m[2]) / 60, comment: m[3] };\n  m = v.match(/^(\\d{1,2}(?:\\.\\d+)?)\\s*(?:h|godz\\.?|godzin[ay]?)\\s*(?:(\\d{1,2})\\s*(?:m|min\\.?)?)?(?:\\s+([\\s\\S]*))?$/i);\n  if (m) return { hours: Number(m[1]) + (m[2] ? Number(m[2]) / 60 : 0), comment: m[3] };\n  m = v.match(/^(\\d{2,3})\\s*(?:m|min\\.?)(?:\\s+([\\s\\S]*))?$/i);\n  if (m) return { hours: Number(m[1]) / 60, comment: m[2] };\n  m = v.match(/^(\\d{1,2}(?:\\.\\d{1,2})?)(?:\\s+([\\s\\S]*))?$/);\n  if (m) return { hours: Number(m[1]), comment: m[2] };\n  return null;\n};\nconst OFF_WORD = /^(wolne|urlop|off|l4|chorobowe)(?:\\s+([\\s\\S]*))?$/i;\nconst isOff = (s) => OFF_WORD.test(s) || (parseHours(s) || {}).hours === 0;\n\n// \"do <day>\" sets the last day of a day-off range: piątku / pt / jutra / końca tygodnia / 16.10 / 2026-10-16\nconst now = DateTime.now().setZone(ZONE);\nconst nextWeekday = (wd) => { let d = now.startOf('day'); while (d.weekday !== wd) d = d.plus({ days: 1 }); return d; };\nconst WEEKDAYS = [[1, /^(pon|pn)/], [2, /^wt/], [3, /^(sr|śr)/], [4, /^czw/], [5, /^(pi[aą]|pt)/], [6, /^sob/], [7, /^(nd|niedz)/]];\nconst untilDate = (token) => {\n  const t = token.toLowerCase().replace(/\\.$/, '');\n  if (t === 'jutra') return now.plus({ days: 1 }).startOf('day');\n  if (t === 'pojutrza') return now.plus({ days: 2 }).startOf('day');\n  if (/^ko[nń]ca\\s+tygodnia$/.test(t)) return nextWeekday(5);\n  let m = t.match(/^(\\d{4})-(\\d{2})-(\\d{2})$/);\n  if (m) return DateTime.fromObject({ year: Number(m[1]), month: Number(m[2]), day: Number(m[3]) }, { zone: ZONE });\n  m = t.match(/^(\\d{1,2})[./](\\d{1,2})(?:[./](\\d{2}|\\d{4}))?$/);\n  if (m) {\n    const year = m[3] ? Number(m[3].length === 2 ? `20${m[3]}` : m[3]) : now.year;\n    let d = DateTime.fromObject({ year, month: Number(m[2]), day: Number(m[1]) }, { zone: ZONE });\n    if (!m[3] && d.isValid && d < now.startOf('day')) d = d.plus({ years: 1 });\n    return d;\n  }\n  for (const [wd, re] of WEEKDAYS) if (re.test(t)) return nextWeekday(wd);\n  return null;\n};\n\nlet body = text;\nlet until = '';\nconst um = text.match(/(?:^|\\s)do\\s+(ko[nń]ca\\s+tygodnia|\\d{4}-\\d{2}-\\d{2}|\\d{1,2}[./]\\d{1,2}(?:[./]\\d{2,4})?|\\p{L}+\\.?)(?=\\s|$)/iu);\nif (um) {\n  const d = untilDate(um[1]);\n  if (d && d.isValid) {\n    const rest = `${text.slice(0, um.index)} ${text.slice(um.index + um[0].length)}`.replace(/\\s+/g, ' ').trim();\n    if (isOff(rest)) {\n      body = rest;\n      until = d.toISODate();\n    } else {\n      const ph = parseHours(rest);\n      if (ph && ph.hours > 0 && !String(ph.comment || '').trim()) {\n        return reply('Godzin nie wpisuję z wyprzedzeniem. Zakres „do …” działa dla wolnego, np. <code>0 do piątku</code> albo <code>L4 do 16.10</code>.');\n      }\n    }\n  }\n}\n\nconst dayOff = (comment) => [{\n  json: { ...base, intent: 'mark', status: 'day_off', date: replyDate, until, comment: String(comment || '').trim().slice(0, 200) },\n}];\nconst offWord = body.match(OFF_WORD);\nif (offWord) {\n  const tag = { l4: 'L4', urlop: 'urlop', chorobowe: 'chorobowe' }[offWord[1].toLowerCase()] || '';\n  return dayOff([tag, String(offWord[2] || '').trim()].filter(Boolean).join(' '));\n}\nif (/^(ok|okej|okay|zostaw|ok, zostaw)$/.test(cmd)) return [{ json: { ...base, intent: 'mark', status: 'ok', date: replyDate } }];\n\nconst p = parseHours(body);\nif (!p) {\n  return reply('Nie rozumiem. Odpisz liczbę godzin, np. <code>8</code>, <code>7,5</code>, <code>7:30</code> albo <code>7h30</code>. Pomoc: /help');\n}\nif (p.hours === 0) return dayOff(p.comment); // 0, 0h, 0:00, \"0 L4\" = day off, nothing goes to Everhour\nif (!(p.hours <= 16)) return reply(`${fmtH(p.hours)} h? Maksymalnie 16 h na dzień.`);\nconst seconds = Math.round(p.hours * 60) * 60;\nreturn [{\n  json: { ...base, intent: 'log', date: replyDate, seconds, hours: seconds / 3600, comment: String(p.comment || '').trim().slice(0, 500) },\n}];\n"
+      }
+    },
+    {
+      "id": "id27",
+      "name": "Is callback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        360
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "id26",
+              "leftValue": "={{ $json.isCallback }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "id28",
+      "name": "Answer callback",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1200,
+        340
+      ],
+      "parameters": {
+        "resource": "callback",
+        "operation": "answerQuery",
+        "queryId": "={{ $json.callbackId }}",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Telegram: Everhour bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "id29",
+      "name": "Get pending days",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        560
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "everhour_reminders"
+        },
+        "matchType": "anyCondition",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "pending"
+            },
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "day_off"
+            }
+          ]
+        },
+        "returnAll": true,
+        "orderBy": true,
+        "orderByColumn": "date",
+        "orderByDirection": "DESC"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "id30",
+      "name": "Resolve action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        560
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Resolve the day an answer refers to and pick the route.\n// Date order: button/reply-to tag > newest pending reminder > ask (today/yesterday).\n// Day-off ranges (\"0 do piątku\") start today, or at the reminder's day when replying to it, and never ask.\nconst ZONE = 'Europe/Warsaw';\nconst DAYS = ['poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota', 'niedziela'];\nconst label = (iso) => {\n  const d = DateTime.fromISO(iso, { zone: ZONE });\n  return `${DAYS[d.weekday - 1]} ${d.day}.${String(d.month).padStart(2, '0')}`;\n};\nconst fmtH = (h) => String(Math.round(h * 100) / 100).replace('.', ',');\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n// Telegram callback_data max 64 bytes: \"off|YYYY-MM-DD|\" + 12 code points (<= 4 bytes each)\nconst cbText = (s) => Array.from(String(s || '').replace(/\\|/g, '/').trim()).slice(0, 12).join('');\nconst workdays = (n) => (n === 1 ? 'dzień roboczy' : (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? 'dni robocze' : 'dni roboczych'));\nconst MAX_AHEAD_DAYS = 45;\n\nconst p = $('Parse update').first().json;\nconst cfg = $('Config').first().json;\nconst now = DateTime.now().setZone(ZONE);\nconst today = now.toISODate();\nconst yesterday = now.minus({ days: 1 }).toISODate();\nconst lockDays = Math.max(1, Number(cfg.LOCK_DAYS) || 2);\nconst oldest = now.minus({ days: lockDays - 1 }).toISODate();\nconst rows = $('Get pending days').all().map((i) => i.json).filter((r) => r && typeof r.date === 'string' && r.date);\nconst pending = rows.filter((r) => r.status === 'pending' && r.date >= oldest && r.date <= today)\n  .sort((a, b) => b.date.localeCompare(a.date));\nconst plannedOff = rows.filter((r) => r.status === 'day_off' && r.date >= today && String(r.note || '').startsWith('telegram'))\n  .sort((a, b) => a.date.localeCompare(b.date));\nconst reply = (text) => [{ json: { ...p, route: 'reply', text } }];\n\nif (p.intent === 'reply') return [{ json: { ...p, route: 'reply' } }];\nif (p.intent === 'status') {\n  return [{ json: { ...p, route: 'status', from: now.minus({ days: 6 }).toISODate(), to: today } }];\n}\n\nif (p.intent === 'report') return [{ json: { ...p, route: 'report' } }];\nif (p.intent === 'invoice') return [{ json: { ...p, route: 'invoice' } }];\n\nif (p.intent === 'resume') {\n  if (!plannedOff.length) return reply('Nie mam zaplanowanego wolnego, przypominam normalnie.');\n  const states = plannedOff.map((r) => ({ state: { date: r.date, status: 'cancelled', note: 'telegram: wracam' } }));\n  return [{\n    json: { ...p, route: 'mark', states, text: `OK, odwołuję wolne: ${plannedOff.map((r) => label(r.date)).join(', ')}. Przypomnienia wracają.` },\n  }];\n}\n\nif (p.intent === 'mark' && p.status === 'day_off' && p.until) {\n  const start = p.date || today;\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(start) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(p.until)) return reply('Nie rozpoznaję daty.');\n  if (p.until < start) return reply(`<b>${label(p.until)}</b> wypada przed <b>${label(start)}</b>. Podaj późniejszy dzień.`);\n  const end = DateTime.fromISO(p.until, { zone: ZONE });\n  if (end > now.startOf('day').plus({ days: MAX_AHEAD_DAYS })) return reply(`Maksymalnie ${MAX_AHEAD_DAYS} dni naprzód.`);\n  const days = [];\n  for (let d = DateTime.fromISO(start, { zone: ZONE }); d <= end; d = d.plus({ days: 1 })) {\n    if (d.weekday <= 5) days.push(d.toISODate());\n  }\n  if (!days.length) return reply('W tym zakresie nie ma dni roboczych.');\n  const why = p.comment ? ` (${esc(p.comment)})` : '';\n  const note = `telegram: ${p.comment ? `${String(p.comment).slice(0, 150)} ` : ''}do ${p.until}`;\n  const states = days.map((date) => ({ state: { date, status: 'day_off', note } }));\n  const span = days.length === 1\n    ? `<b>${label(days[0])}</b>`\n    : `od <b>${label(days[0])}</b> do <b>${label(days[days.length - 1])}</b> (${days.length} ${workdays(days.length)})`;\n  const open = pending.filter((r) => r.date < start);\n  const openLine = open.length\n    ? `\\n${open.map((r) => `<b>${label(r.date)}</b>`).join(', ')} nadal czeka na odpowiedź (liczba godzin albo 0).`\n    : '';\n  return [{ json: { ...p, route: 'mark', states, text: `OK, wolne ${span}${why}. Do tego czasu nie przypominam.${openLine}` } }];\n}\n\nconst ask = (text, todayData, yesterdayData) => [{\n  json: {\n    ...p,\n    route: 'ask',\n    text,\n    todayLabel: `Dziś, ${label(today)}`,\n    todayData,\n    yesterdayLabel: `Wczoraj, ${label(yesterday)}`,\n    yesterdayData,\n  },\n}];\n\nlet date = p.date;\nif (!date && pending.length) date = pending[0].date;\nif (!date) {\n  if (p.intent === 'log') {\n    return ask(`Za który dzień wpisać ${fmtH(p.hours)} h?`, `log|${today}|${p.seconds}`, `log|${yesterday}|${p.seconds}`);\n  }\n  if (p.intent === 'mark' && p.status === 'day_off') {\n    const c = cbText(p.comment);\n    return ask('Który dzień oznaczyć jako wolny?', `off|${today}|${c}`, `off|${yesterday}|${c}`);\n  }\n  return reply('Nie mam otwartego przypomnienia. Odpowiedz bezpośrednio na wiadomość z datą.');\n}\nif (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) return reply('Nie rozpoznaję daty w tej wiadomości.');\n\nif (p.intent === 'mark') {\n  const why = p.comment ? ` (${esc(p.comment)})` : '';\n  const text = p.status === 'day_off'\n    ? `OK, <b>${label(date)}</b> to dzień wolny${why}. Nie przypominam.`\n    : `OK, zostawiam <b>${label(date)}</b> bez zmian.`;\n  const note = p.comment ? `telegram: ${String(p.comment).slice(0, 200)}` : 'telegram';\n  return [{ json: { ...p, date, route: 'mark', text, states: [{ state: { date, status: p.status, note } }] } }];\n}\n\n// log\nif (date < oldest) {\n  return reply(`<b>${label(date)}</b> jest już poza oknem edycji w Everhourze. Poproś administratora Everhoura w firmie o odblokowanie albo dopisanie godzin.`);\n}\nif (date > today) return reply('Nie wpisuję godzin z wyprzedzeniem.');\nreturn [{\n  json: { ...p, date, route: 'log', from: DateTime.fromISO(date, { zone: ZONE }).minus({ days: 45 }).toISODate(), to: date },\n}];\n"
+      }
+    },
+    {
+      "id": "id36",
+      "name": "Route action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1440,
+        560
+      ],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "id31",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "log",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "log"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "id32",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "mark",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "mark"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "id33",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "ask",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "ask"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "id34",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "reply",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "reply"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "id35",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "status"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "id53",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "report",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "report"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "id54",
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "invoice",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "invoice"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "id37",
+      "name": "Everhour: me (log)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        340
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.everhour.com/users/me",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": false,
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Everhour API key"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "id38",
+      "name": "Everhour: time (log)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        340
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.everhour.com/users/{{ $json.body && $json.body.id ? $json.body.id : 'me' }}/time",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "from",
+              "value": "={{ $('Resolve action').first().json.from }}"
+            },
+            {
+              "name": "to",
+              "value": "={{ $('Resolve action').first().json.to }}"
+            },
+            {
+              "name": "limit",
+              "value": "1000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Everhour API key"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "id39",
+      "name": "Plan time entry",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        340
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Plan the Everhour write so the day total equals the answered value.\n// Task: Config.EVERHOUR_TASK_ID, or the task with the most time in the 14 days before the day.\nconst ZONE = 'Europe/Warsaw';\nconst DAYS = ['poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota', 'niedziela'];\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst label = (iso) => {\n  const d = DateTime.fromISO(iso, { zone: ZONE });\n  return `${DAYS[d.weekday - 1]} ${d.day}.${String(d.month).padStart(2, '0')}`;\n};\nconst fmtH = (h) => String(Math.round(h * 100) / 100).replace('.', ',');\nconst errText = (res) => {\n  if (!res) return 'brak odpowiedzi';\n  if (res.error) return String(res.error.message || res.error).slice(0, 200);\n  const b = res.body;\n  const msg = b && typeof b === 'object' ? (b.message || b.error || JSON.stringify(b)) : String(b ?? '');\n  return `HTTP ${res.statusCode ?? '?'}${msg ? ': ' + msg : ''}`.slice(0, 200);\n};\n\nconst r = $('Resolve action').first().json;\nconst cfg = $('Config').first().json;\nconst me = $('Everhour: me (log)').first().json;\nconst tr = $('Everhour: time (log)').first().json;\nconst reply = (text) => [{ json: { chatId: r.chatId, write: false, text } }];\n\nif (!(me && me.statusCode === 200 && me.body && me.body.id)) {\n  return reply(`Everhour: nie mogę pobrać profilu (${esc(errText(me))}). Sprawdź klucz API w credentialu.`);\n}\nif (!(tr && tr.statusCode === 200 && Array.isArray(tr.body))) {\n  return reply(`Everhour: nie mogę pobrać wpisów (${esc(errText(tr))}).`);\n}\n\nconst userId = me.body.id;\nconst records = tr.body.filter((x) => x && x.date);\nconst day = records.filter((x) => x.date === r.date);\nconst total = day.reduce((s, x) => s + (Number(x.time) || 0), 0);\nconst cfgTask = String(cfg.EVERHOUR_TASK_ID ?? '').trim();\n// Main task = most time in the 14 days before the day (one-off HR/meeting entries do not win)\nconst mainTask = (list, beforeIso) => {\n  const since = DateTime.fromISO(beforeIso, { zone: ZONE }).minus({ days: 14 }).toISODate();\n  const withTask = list.filter((x) => x.task && x.task.id);\n  const recent = withTask.filter((x) => String(x.date) >= since);\n  const totals = new Map();\n  for (const x of (recent.length ? recent : withTask)) {\n    const id = String(x.task.id);\n    const e = totals.get(id) || { id, name: x.task.name, sec: 0, last: '' };\n    e.sec += Number(x.time) || 0;\n    if (String(x.date) > e.last) e.last = String(x.date);\n    totals.set(id, e);\n  }\n  return [...totals.values()].sort((a, b) => b.sec - a.sec || b.last.localeCompare(a.last))[0] || null;\n};\nconst auto = mainTask(records, r.date);\nconst taskId = cfgTask || (auto ? auto.id : '');\nif (!taskId) {\n  return reply('Nie wiem, na który task logować (brak wpisów z ostatnich 45 dni). Wpisz EVERHOUR_TASK_ID w node Config.');\n}\nconst taskRec = records.find((x) => x.task && String(x.task.id) === taskId);\nconst taskName = taskRec ? taskRec.task.name : taskId;\nconst onTask = day.filter((x) => x.task && String(x.task.id) === taskId);\nconst onTaskSec = onTask.reduce((s, x) => s + (Number(x.time) || 0), 0);\nconst other = total - onTaskSec;\nconst desired = Number(r.seconds);\nconst newTaskTime = desired - other;\n\nif (desired === total) return reply(`Za <b>${label(r.date)}</b> jest już ${fmtH(total / 3600)} h. Nic nie zmieniam.`);\nif (newTaskTime <= 0) {\n  return reply(`Za <b>${label(r.date)}</b> masz już ${fmtH(other / 3600)} h na innych taskach. Popraw ręcznie w Everhourze.`);\n}\nif (onTask.length > 1) return reply(`Za <b>${label(r.date)}</b> ten task ma kilka wpisów. Popraw ręcznie w Everhourze.`);\n\nconst existing = onTask[0] || null;\nconst comment = r.comment || (existing && existing.comment) || '';\nconst body = existing\n  ? { time: newTaskTime, ...(comment ? { comment } : {}) }\n  : { task: taskId, user: userId, date: r.date, time: newTaskTime, ...(comment ? { comment } : {}) };\n\nreturn [{\n  json: {\n    chatId: r.chatId,\n    write: true,\n    method: existing ? 'PUT' : 'POST',\n    url: existing ? `https://api.everhour.com/time/${existing.id}` : 'https://api.everhour.com/time',\n    body,\n    date: r.date,\n    desired,\n    other,\n    previous: total,\n    taskName,\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "id41",
+      "name": "Write needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2400,
+        340
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "id40",
+              "leftValue": "={{ $json.write }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "id42",
+      "name": "Everhour: save time",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        320
+      ],
+      "parameters": {
+        "method": "={{ $json.method }}",
+        "url": "={{ $json.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": false,
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Everhour API key"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "id43",
+      "name": "Format log result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        320
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Confirmation message after the Everhour write.\nconst ZONE = 'Europe/Warsaw';\nconst DAYS = ['poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota', 'niedziela'];\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst label = (iso) => {\n  const d = DateTime.fromISO(iso, { zone: ZONE });\n  return `${DAYS[d.weekday - 1]} ${d.day}.${String(d.month).padStart(2, '0')}`;\n};\nconst fmtH = (h) => String(Math.round(h * 100) / 100).replace('.', ',');\nconst errText = (res) => {\n  if (!res) return 'brak odpowiedzi';\n  if (res.error) return String(res.error.message || res.error).slice(0, 200);\n  const b = res.body;\n  const msg = b && typeof b === 'object' ? (b.message || b.error || JSON.stringify(b)) : String(b ?? '');\n  return `HTTP ${res.statusCode ?? '?'}${msg ? ': ' + msg : ''}`.slice(0, 200);\n};\n\nconst plan = $('Plan time entry').first().json;\nconst res = $('Everhour: save time').first().json;\nconst ok = Boolean(res && res.statusCode >= 200 && res.statusCode < 300);\nif (!ok) {\n  return [{ json: { chatId: plan.chatId, ok: false, text: `Everhour odrzucił wpis za <b>${label(plan.date)}</b> (${esc(errText(res))}).` } }];\n}\nconst saved = (res.body && Number(res.body.time)) || Number(plan.body.time);\nconst hours = (plan.other + saved) / 3600;\nconst prev = plan.previous ? ` (było ${fmtH(plan.previous / 3600)} h)` : '';\nreturn [{\n  json: {\n    chatId: plan.chatId,\n    ok: true,\n    text: `Zapisane: <b>${fmtH(hours)} h</b> za ${label(plan.date)}${prev}, task „${esc(plan.taskName)}”.`,\n    state: { date: plan.date, status: 'logged', hours, note: 'telegram' },\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "id45",
+      "name": "Logged OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3120,
+        220
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "id44",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "id46",
+      "name": "Save logged state",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        3360,
+        200
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "everhour_reminders"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "date",
+              "condition": "eq",
+              "keyValue": "={{ $json.state.date }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $json.state.date }}",
+            "status": "={{ $json.state.status }}",
+            "hours": "={{ $json.state.hours }}",
+            "note": "={{ $json.state.note }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hours",
+              "displayName": "hours",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pings",
+              "displayName": "pings",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "id47",
+      "name": "Split days",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        1680,
+        540
+      ],
+      "parameters": {
+        "fieldToSplitOut": "states",
+        "include": "noOtherFields",
+        "options": {}
+      }
+    },
+    {
+      "id": "id48",
+      "name": "Save marked state",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1920,
+        540
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "everhour_reminders"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "date",
+              "condition": "eq",
+              "keyValue": "={{ $json.state.date }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $json.state.date }}",
+            "status": "={{ $json.state.status }}",
+            "note": "={{ $json.state.note }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hours",
+              "displayName": "hours",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "pings",
+              "displayName": "pings",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "id49",
+      "name": "Ask which day",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1680,
+        720
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.text }}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "={{ $json.todayLabel }}",
+                    "additionalFields": {
+                      "callback_data": "={{ $json.todayData }}"
+                    }
+                  },
+                  {
+                    "text": "={{ $json.yesterdayLabel }}",
+                    "additionalFields": {
+                      "callback_data": "={{ $json.yesterdayData }}"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "Anuluj",
+                    "additionalFields": {
+                      "callback_data": "cancel"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Telegram: Everhour bot"
+        }
+      }
+    },
+    {
+      "id": "id50",
+      "name": "Everhour: me (status)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        900
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.everhour.com/users/me",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": false,
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Everhour API key"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "id51",
+      "name": "Everhour: time (status)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        900
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.everhour.com/users/{{ $json.body && $json.body.id ? $json.body.id : 'me' }}/time",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "from",
+              "value": "={{ $('Resolve action').first().json.from }}"
+            },
+            {
+              "name": "to",
+              "value": "={{ $('Resolve action').first().json.to }}"
+            },
+            {
+              "name": "limit",
+              "value": "1000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Everhour API key"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "id52",
+      "name": "Format status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        900
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// /status: Everhour profile timezone + time tracking policy + last 7 days.\n// Only selected fields are echoed (the /users/me response also contains the API key).\nconst ZONE = 'Europe/Warsaw';\nconst DAYS = ['poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota', 'niedziela'];\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst label = (iso) => {\n  const d = DateTime.fromISO(iso, { zone: ZONE });\n  return `${DAYS[d.weekday - 1]} ${d.day}.${String(d.month).padStart(2, '0')}`;\n};\nconst fmtH = (h) => String(Math.round(h * 100) / 100).replace('.', ',');\nconst errText = (res) => {\n  if (!res) return 'brak odpowiedzi';\n  if (res.error) return String(res.error.message || res.error).slice(0, 200);\n  const b = res.body;\n  const msg = b && typeof b === 'object' ? (b.message || b.error || JSON.stringify(b)) : String(b ?? '');\n  return `HTTP ${res.statusCode ?? '?'}${msg ? ': ' + msg : ''}`.slice(0, 200);\n};\nconst json = (v, max) => esc(JSON.stringify(v ?? null).slice(0, max));\n\nconst r = $('Resolve action').first().json;\nconst me = $('Everhour: me (status)').first().json;\nconst tr = $('Everhour: time (status)').first().json;\nconst now = DateTime.now().setZone(ZONE);\n\nif (!(me && me.statusCode === 200 && me.body && me.body.id)) {\n  return [{ json: { chatId: r.chatId, text: `Everhour: nie mogę pobrać profilu (${esc(errText(me))}). Sprawdź klucz API w credentialu.` } }];\n}\nconst u = me.body;\nconst warsaw = now.offset / 60;\nconst tz = u.timezone === undefined || u.timezone === null || u.timezone === '' ? null : Number(u.timezone);\nconst tzText = tz === null || Number.isNaN(tz) ? 'brak' : `UTC${tz >= 0 ? '+' : ''}${tz}`;\nconst teamBits = {};\nif (u.team && typeof u.team === 'object') {\n  for (const [k, v] of Object.entries(u.team)) if (/lock|limit|policy|workday|tracking/i.test(k)) teamBits[k] = v;\n}\n\nconst lines = [\n  `<b>Everhour</b>: ${esc(u.name || '')} (id ${esc(u.id)}, rola ${esc(u.role || '?')})`,\n  `Strefa w profilu: ${tzText}; Warszawa teraz: UTC+${warsaw}${tz !== null && tz !== warsaw ? ' (różnica!)' : ''}`,\n  `Polityka czasu (profil): <code>${json(u.timeTrackingPolicy, 500)}</code>`,\n];\nif (Object.keys(teamBits).length) lines.push(`Zespół: <code>${json(teamBits, 700)}</code>`);\n\nif (tr && tr.statusCode === 200 && Array.isArray(tr.body)) {\n  lines.push('', '<b>Ostatnie 7 dni</b>');\n  for (let i = 6; i >= 0; i -= 1) {\n    const d = now.minus({ days: i });\n    const iso = d.toISODate();\n    const sec = tr.body.filter((x) => x && x.date === iso).reduce((s, x) => s + (Number(x.time) || 0), 0);\n    lines.push(`${label(iso)}: ${fmtH(sec / 3600)} h${sec === 0 && d.weekday <= 5 && i > 0 ? ' (brak)' : ''}`);\n  }\n} else {\n  lines.push('', `Nie mogę pobrać wpisów (${esc(errText(tr))}).`);\n}\nlet planned = [];\ntry {\n  planned = $('Get pending days').all().map((i) => i.json)\n    .filter((x) => x && x.status === 'day_off' && typeof x.date === 'string' && x.date >= now.toISODate())\n    .map((x) => x.date).sort();\n} catch (e) {\n  planned = [];\n}\nif (planned.length) lines.push('', `<b>Zaplanowane wolne</b>: ${planned.map(label).join(', ')}`);\n\nreturn [{ json: { chatId: r.chatId, text: lines.join('\\n') } }];\n"
+      }
+    },
+    {
+      "id": "id53",
+      "name": "Send reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3360,
+        560
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.text }}",
+        "replyMarkup": "none",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Telegram: Everhour bot"
+        }
+      }
+    },
+    {
+      "id": "id54",
+      "name": "Everhour: me (report)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1568,
+        1184
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.everhour.com/users/me",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": false,
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Everhour API key"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "id55",
+      "name": "Everhour: users report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1792,
+        1184
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.everhour.com/dashboards/users",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "date.gte",
+              "value": "={{ $('Resolve action').first().json.from }}"
+            },
+            {
+              "name": "date.lte",
+              "value": "={{ $('Resolve action').first().json.to }}"
+            },
+            {
+              "name": "memberId",
+              "value": "={{ $('Everhour: me (report)').first().json.body && $('Everhour: me (report)').first().json.body.id ? $('Everhour: me (report)').first().json.body.id : 0 }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Everhour API key"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "id56",
+      "name": "Everhour: projects report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2016,
+        1184
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.everhour.com/dashboards/projects",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "date.gte",
+              "value": "={{ $('Resolve action').first().json.from }}"
+            },
+            {
+              "name": "date.lte",
+              "value": "={{ $('Resolve action').first().json.to }}"
+            },
+            {
+              "name": "memberId",
+              "value": "={{ $('Everhour: me (report)').first().json.body && $('Everhour: me (report)').first().json.body.id ? $('Everhour: me (report)').first().json.body.id : 0 }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Everhour API key"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "id57",
+      "name": "Everhour: time (report)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        1184
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.everhour.com/users/{{ $('Everhour: me (report)').first().json.body && $('Everhour: me (report)').first().json.body.id ? $('Everhour: me (report)').first().json.body.id : 'me' }}/time",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "keypair",
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "from",
+              "value": "={{ $('Resolve action').first().json.from }}"
+            },
+            {
+              "name": "to",
+              "value": "={{ $('Resolve action').first().json.to }}"
+            },
+            {
+              "name": "limit",
+              "value": "1000"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Everhour API key"
+        }
+      },
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "id58",
+      "name": "Format report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        1184
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// /tydzien and /raport. The total is Everhour's own report (GET /dashboards/users, row of this user) as-is:\n// the bot never adds time up for it, it only formats seconds. Project lines come from GET /dashboards/projects\n// and are shown only when they add up exactly to that total (a consistency check, not a calculation).\n// Per-day lines (week only, for curiosity) come from time records and are flagged if they disagree with the report.\nconst ZONE = 'Europe/Warsaw';\nconst SHORT = ['pn', 'wt', 'śr', 'cz', 'pt', 'sb', 'nd'];\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst errText = (res) => {\n  if (!res) return 'brak odpowiedzi';\n  if (res.error) return String(res.error.message || res.error).slice(0, 200);\n  const b = res.body;\n  const msg = b && typeof b === 'object' ? (b.message || b.error || JSON.stringify(b)) : String(b ?? '');\n  return `HTTP ${res.statusCode ?? '?'}${msg ? ': ' + msg : ''}`.slice(0, 200);\n};\nconst secOf = (v) => Math.round(Number(v) || 0);\nconst hm = (sec) => {\n  const s = secOf(sec);\n  const h = Math.floor(s / 3600);\n  const m = Math.floor((s % 3600) / 60);\n  const r = s % 60;\n  return `${h} h${m || r ? ` ${String(m).padStart(2, '0')} min` : ''}${r ? ` ${r} s` : ''}`;\n};\n// decimal hours, shown next to h/min when the total is not a whole hour; \"≈\" when rounded to 2 places\nconst dec = (sec) => {\n  const v = secOf(sec) / 3600;\n  const rounded = Math.round(v * 100) / 100;\n  return `${Math.abs(rounded - v) > 1e-9 ? '≈' : ''}${String(rounded).replace('.', ',')} h`;\n};\nconst both = (sec) => (secOf(sec) % 3600 ? `<b>${hm(sec)}</b> (${dec(sec)})` : `<b>${hm(sec)}</b>`);\nconst fd = (iso) => {\n  const d = DateTime.fromISO(iso, { zone: ZONE });\n  return `${d.day}.${String(d.month).padStart(2, '0')}`;\n};\n\nconst r = $('Resolve action').first().json;\nconst me = $('Everhour: me (report)').first().json;\nconst users = $('Everhour: users report').first().json;\nconst projects = $('Everhour: projects report').first().json;\nconst recs = $('Everhour: time (report)').first().json;\nconst out = (text) => [{ json: { chatId: r.chatId, text } }];\n\nif (!(me && me.statusCode === 200 && me.body && me.body.id)) {\n  return out(`Everhour: nie mogę pobrać profilu (${esc(errText(me))}).`);\n}\nif (!(users && users.statusCode === 200 && Array.isArray(users.body))) {\n  return out(`Everhour nie zwrócił raportu (${esc(errText(users))}). Sumy nie liczę na własną rękę.`);\n}\nconst myId = Number(me.body.id);\nconst row = users.body.find((u) => u && Number(u.memberId) === myId) || null;\nif (!row && users.body.length) {\n  // A report came back, but not for this account: never guess a total\n  const keys = Object.keys(users.body[0] || {}).slice(0, 12).join(', ');\n  return out(`Raport Everhoura nie ma wiersza dla Twojego konta (id ${esc(myId)}). Pola w odpowiedzi: ${esc(keys)}. Sumy nie liczę na własną rękę.`);\n}\nconst total = row ? secOf(row.time) : 0; // empty report = nothing tracked in the period\nconst month = r.reportKind === 'month';\n\nconst lines = [];\nlines.push(month\n  ? `<b>Raport Everhour: ${esc(r.period)}</b> (${fd(r.from)}–${fd(r.to)}${r.running ? ', miesiąc w toku' : ''})`\n  : `<b>Tydzień ${esc(r.period)}</b>`);\nlines.push(`Łącznie: ${both(total)}`);\nif (row && secOf(row.nonBillableTime) > 0) {\n  lines.push(`Billable: ${hm(row.billableTime)}, non-billable: ${hm(row.nonBillableTime)}`);\n}\nif (row && secOf(row.timeOffTime) > 0) {\n  lines.push(`Time off w Everhourze: ${hm(row.timeOffTime)}${Number(row.timeOffDays) ? ` (${esc(row.timeOffDays)} d)` : ''}`);\n}\n\nif (projects && projects.statusCode === 200 && Array.isArray(projects.body)) {\n  const list = projects.body.filter((x) => x && secOf(x.time) > 0).sort((a, b) => secOf(b.time) - secOf(a.time));\n  const check = list.reduce((s, x) => s + secOf(x.time), 0);\n  if (list.length && check === total) {\n    if (month || list.length > 1) {\n      lines.push('', '<b>Projekty</b>');\n      for (const x of list) lines.push(`• ${esc(x.projectName || x.projectId)}: ${hm(x.time)}`);\n    }\n  } else if (list.length && month) {\n    lines.push('', 'Rozbicie na projekty pominięte: raport projektów nie zgadza się z sumą.');\n  }\n} else if (month) {\n  lines.push('', `Rozbicie na projekty niedostępne (${esc(errText(projects))}).`);\n}\n\n// Week only: per-day view from time records\nif (!month) {\n  if (recs && recs.statusCode === 200 && Array.isArray(recs.body)) {\n    const today = DateTime.now().setZone(ZONE).toISODate();\n    const inRange = recs.body.filter((x) => x && typeof x.date === 'string' && x.date >= r.from && x.date <= r.to);\n    let off = new Set();\n    try {\n      off = new Set($('Get pending days').all().map((i) => i.json)\n        .filter((x) => x && x.status === 'day_off' && typeof x.date === 'string').map((x) => x.date));\n    } catch (e) {\n      off = new Set();\n    }\n    const days = [];\n    for (let d = DateTime.fromISO(r.from, { zone: ZONE }); d.toISODate() <= r.to && d.toISODate() <= today; d = d.plus({ days: 1 })) {\n      const iso = d.toISODate();\n      const sec = inRange.filter((x) => x.date === iso).reduce((s, x) => s + secOf(x.time), 0);\n      if (d.weekday > 5 && sec === 0) continue;\n      let tag = '';\n      if (iso === today) tag = ' (dziś)';\n      else if (sec === 0) tag = off.has(iso) ? ' (wolne)' : ' (brak)';\n      days.push(`${SHORT[d.weekday - 1]} ${fd(iso)}: ${hm(sec)}${tag}`);\n    }\n    if (days.length) lines.push('', ...days);\n    const daysTotal = inRange.reduce((s, x) => s + secOf(x.time), 0);\n    if (daysTotal !== total) lines.push(`Uwaga: wpisy dzienne dają ${hm(daysTotal)}, raport Everhoura ${hm(total)}.`);\n  } else {\n    lines.push('', `Dni niedostępne (${esc(errText(recs))}).`);\n  }\n}\n\nif (month) lines.push('', 'Źródło: raport Everhour (dashboards/users), bez przeliczeń po stronie bota.');\nreturn out(lines.join('\\n'));\n"
+      }
+    },
+    {
+      "id": "id59",
+      "name": "Get invoice rows",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        -288
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "invoice_reminders"
+        },
+        "returnAll": true,
+        "orderBy": false
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "id60",
+      "name": "Decide invoice reminder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        -288
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Monthly invoice reminder (for contractors billing by the hour). The invoice is due on the last workday (Mon-Fri) of the month.\n// Heads-up on the day before at 9:30, then every scheduled run (9:30, 14:00, 21:30) from the due day\n// until the month is marked \"wystawiona\" (text reply or button). State: Data table invoice_reminders.\n// Config.INVOICE_REMINDERS = false switches these reminders off.\nconst ZONE = 'Europe/Warsaw';\nconst DAYS = ['poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota', 'niedziela'];\nconst NOM = ['styczeń', 'luty', 'marzec', 'kwiecień', 'maj', 'czerwiec', 'lipiec', 'sierpień', 'wrzesień', 'październik', 'listopad', 'grudzień'];\nconst GEN = ['stycznia', 'lutego', 'marca', 'kwietnia', 'maja', 'czerwca', 'lipca', 'sierpnia', 'września', 'października', 'listopada', 'grudnia'];\nconst label = (d) => `${DAYS[d.weekday - 1]} ${d.day}.${String(d.month).padStart(2, '0')}`;\nconst dueDay = (y, m) => {\n  let d = DateTime.fromObject({ year: y, month: m, day: 1 }, { zone: ZONE }).endOf('month').startOf('day');\n  while (d.weekday > 5) d = d.minus({ days: 1 });\n  return d;\n};\n\nconst cfg = $('Config').first().json;\nconst chatId = String(cfg.TELEGRAM_CHAT_ID ?? '').trim();\nif (!chatId) return [];\nif (cfg.INVOICE_REMINDERS === false || String(cfg.INVOICE_REMINDERS).trim().toLowerCase() === 'false') return [];\nconst now = cfg.test_now\n  ? DateTime.fromISO(String(cfg.test_now), { zone: ZONE })\n  : DateTime.now().setZone(ZONE);\nconst today = now.toISODate();\nconst slot = now.hour < 12 ? 'morning' : (now.hour < 18 ? 'afternoon' : 'evening');\nconst rows = $('Get invoice rows').all().map((i) => i.json)\n  .filter((r) => r && /^\\d{4}-\\d{2}$/.test(String(r.period || '')));\nconst byPeriod = new Map(rows.map((r) => [String(r.period), r]));\n\n// Open months: already reminded and not issued, plus the current month from the day before its due day\nconst periods = new Set(rows.filter((r) => r.status === 'pending').map((r) => String(r.period)));\nif (today >= dueDay(now.year, now.month).minus({ days: 1 }).toISODate()) periods.add(now.toFormat('yyyy-MM'));\n\nconst out = [];\nfor (const period of [...periods].sort()) {\n  const row = byPeriod.get(period) || null;\n  if (row && row.status === 'issued') continue;\n  const [y, m] = period.split('-').map(Number);\n  const due = dueDay(y, m);\n  const dueIso = due.toISODate();\n  const eveIso = due.minus({ days: 1 }).toISODate();\n  const tag = `\\n<code>faktura ${period}</code>`;\n  let kind;\n  let text;\n  if (today < eveIso) continue;\n  if (today === eveIso) {\n    if (slot !== 'morning') continue;\n    kind = 'heads-up';\n    text = `Jutro (<b>${label(due)}</b>) ostatni dzień roboczy ${GEN[m - 1]}: faktura za ${NOM[m - 1]}.\\nPo wystawieniu kliknij „Wystawiona” albo odpisz „wystawiona”.${tag}`;\n  } else if (today === dueIso) {\n    kind = 'due';\n    text = slot === 'morning'\n      ? `Dziś (<b>${label(due)}</b>) ostatni dzień roboczy ${GEN[m - 1]}: wystaw fakturę za ${NOM[m - 1]}.\\nNajpierw wpisz dzisiejsze godziny, wtedy raport obejmie cały miesiąc.${tag}`\n      : `${slot === 'evening' ? 'Termin mija dziś. ' : 'Przypominam. '}Faktura za ${NOM[m - 1]} czeka na wystawienie.${tag}`;\n  } else {\n    kind = 'overdue';\n    text = `Faktura za ${NOM[m - 1]} nadal niewystawiona (termin: <b>${label(due)}</b>).${tag}`;\n  }\n  out.push({\n    chatId,\n    period,\n    text,\n    reportLabel: `Raport: ${NOM[m - 1]}`,\n    reportData: `rep|${period}`,\n    doneData: `inv|${period}`,\n    state: { period, status: 'pending', pings: (Number(row && row.pings) || 0) + 1, note: kind },\n  });\n}\nreturn out.map((json) => ({ json }));\n"
+      }
+    },
+    {
+      "id": "id61",
+      "name": "Save invoice reminder",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        -384
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "invoice_reminders"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "period",
+              "condition": "eq",
+              "keyValue": "={{ $json.state.period }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "period": "={{ $json.state.period }}",
+            "status": "={{ $json.state.status }}",
+            "pings": "={{ $json.state.pings }}",
+            "note": "={{ $json.state.note }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "period",
+              "displayName": "period",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pings",
+              "displayName": "pings",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "id62",
+      "name": "Send invoice reminder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1120,
+        -192
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chatId }}",
+        "text": "={{ $json.text }}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "={{ $json.reportLabel }}",
+                    "additionalFields": {
+                      "callback_data": "={{ $json.reportData }}"
+                    }
+                  },
+                  {
+                    "text": "Wystawiona",
+                    "additionalFields": {
+                      "callback_data": "={{ $json.doneData }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL",
+          "name": "Telegram: Everhour bot"
+        }
+      }
+    },
+    {
+      "id": "id63",
+      "name": "Get invoice rows (reply)",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        1376
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "invoice_reminders"
+        },
+        "returnAll": true,
+        "orderBy": false
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "id64",
+      "name": "Resolve invoice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        1376
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// \"wystawiona\" (text, reply to a reminder, or the button): mark the invoice for a month as issued.\n// Month: button / reply tag > oldest month still being reminded > current month in its last week before the due day.\nconst ZONE = 'Europe/Warsaw';\nconst DAYS = ['poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota', 'niedziela'];\nconst NOM = ['styczeń', 'luty', 'marzec', 'kwiecień', 'maj', 'czerwiec', 'lipiec', 'sierpień', 'wrzesień', 'październik', 'listopad', 'grudzień'];\nconst label = (d) => `${DAYS[d.weekday - 1]} ${d.day}.${String(d.month).padStart(2, '0')}`;\nconst dueDay = (y, m) => {\n  let d = DateTime.fromObject({ year: y, month: m, day: 1 }, { zone: ZONE }).endOf('month').startOf('day');\n  while (d.weekday > 5) d = d.minus({ days: 1 });\n  return d;\n};\nconst monthName = (period) => `${NOM[Number(period.slice(5)) - 1]} ${period.slice(0, 4)}`;\n\nconst p = $('Resolve action').first().json;\nconst now = DateTime.now().setZone(ZONE);\nconst today = now.toISODate();\nconst rows = $('Get invoice rows (reply)').all().map((i) => i.json)\n  .filter((r) => r && /^\\d{4}-\\d{2}$/.test(String(r.period || '')));\nconst byPeriod = new Map(rows.map((r) => [String(r.period), r]));\nconst pending = rows.filter((r) => r.status === 'pending').map((r) => String(r.period)).sort();\nconst reply = (text) => [{ json: { chatId: p.chatId, text, write: false } }];\n\nlet period = /^\\d{4}-(0[1-9]|1[0-2])$/.test(String(p.invoicePeriod || '')) ? String(p.invoicePeriod) : '';\nif (!period && pending.length) period = pending[0];\nif (!period) {\n  const due = dueDay(now.year, now.month);\n  if (today < due.minus({ days: 7 }).toISODate()) {\n    return reply(`Nie mam otwartej faktury. Najbliższy termin: <b>${label(due)}</b>, przypomnę dzień wcześniej.`);\n  }\n  period = now.toFormat('yyyy-MM'); // issued early, in the last week before the due day\n}\nconst [y, m] = period.split('-').map(Number);\nconst row = byPeriod.get(period) || null;\nif (row && row.status === 'issued') return reply(`Faktura za ${NOM[m - 1]} ${y} jest już odhaczona.`);\n\n// Next month that still needs an invoice, counted from the current month\nconst issued = new Set(rows.filter((r) => r.status === 'issued').map((r) => String(r.period)));\nissued.add(period);\nlet n = now.startOf('month');\nwhile (issued.has(n.toFormat('yyyy-MM'))) n = n.plus({ months: 1 });\nconst nextDue = dueDay(n.year, n.month);\nconst nextLine = nextDue.toISODate() >= today\n  ? ` Następna za ${NOM[n.month - 1]}, termin <b>${label(nextDue)}</b> (przypomnę dzień wcześniej).`\n  : '';\nconst others = pending.filter((x) => x !== period);\nconst otherLine = others.length ? `\\nNadal otwarte: ${others.map(monthName).join(', ')}.` : '';\n\nreturn [{\n  json: {\n    chatId: p.chatId,\n    write: true,\n    text: `Odnotowane: faktura za ${NOM[m - 1]} wystawiona.${nextLine}${otherLine}`,\n    state: { period, status: 'issued', note: 'telegram' },\n  },\n}];\n"
+      }
+    },
+    {
+      "id": "id66",
+      "name": "Invoice to save?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2016,
+        1440
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "id65",
+              "leftValue": "={{ $json.write }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "id67",
+      "name": "Save invoice issued",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2240,
+        1440
+      ],
+      "parameters": {
+        "resource": "row",
+        "operation": "upsert",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "invoice_reminders"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "period",
+              "condition": "eq",
+              "keyValue": "={{ $json.state.period }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "period": "={{ $json.state.period }}",
+            "status": "={{ $json.state.status }}",
+            "note": "={{ $json.state.note }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "period",
+              "displayName": "period",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "pings",
+              "displayName": "pings",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Schedule": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual test": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Is Telegram update?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Telegram update?": {
+      "main": [
+        [
+          {
+            "node": "Parse update",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Compute target day",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get invoice rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute target day": {
+      "main": [
+        [
+          {
+            "node": "Get reminder state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get reminder state": {
+      "main": [
+        [
+          {
+            "node": "Everhour: me (check)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Everhour: me (check)": {
+      "main": [
+        [
+          {
+            "node": "Everhour: time (check)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Everhour: time (check)": {
+      "main": [
+        [
+          {
+            "node": "Decide reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide reminders": {
+      "main": [
+        [
+          {
+            "node": "Save reminder state",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Route reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route reminder": {
+      "main": [
+        [
+          {
+            "node": "Send reminder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send notice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse update": {
+      "main": [
+        [
+          {
+            "node": "Is callback?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get pending days",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is callback?": {
+      "main": [
+        [
+          {
+            "node": "Answer callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get pending days": {
+      "main": [
+        [
+          {
+            "node": "Resolve action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve action": {
+      "main": [
+        [
+          {
+            "node": "Route action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route action": {
+      "main": [
+        [
+          {
+            "node": "Everhour: me (log)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Split days",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ask which day",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Everhour: me (status)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Everhour: me (report)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get invoice rows (reply)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split days": {
+      "main": [
+        [
+          {
+            "node": "Save marked state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Everhour: me (log)": {
+      "main": [
+        [
+          {
+            "node": "Everhour: time (log)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Everhour: time (log)": {
+      "main": [
+        [
+          {
+            "node": "Plan time entry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan time entry": {
+      "main": [
+        [
+          {
+            "node": "Write needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write needed?": {
+      "main": [
+        [
+          {
+            "node": "Everhour: save time",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Everhour: save time": {
+      "main": [
+        [
+          {
+            "node": "Format log result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format log result": {
+      "main": [
+        [
+          {
+            "node": "Logged OK?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Logged OK?": {
+      "main": [
+        [
+          {
+            "node": "Save logged state",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Everhour: me (status)": {
+      "main": [
+        [
+          {
+            "node": "Everhour: time (status)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Everhour: time (status)": {
+      "main": [
+        [
+          {
+            "node": "Format status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format status": {
+      "main": [
+        [
+          {
+            "node": "Send reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Everhour: me (report)": {
+      "main": [
+        [
+          {
+            "node": "Everhour: users report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Everhour: users report": {
+      "main": [
+        [
+          {
+            "node": "Everhour: projects report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Everhour: projects report": {
+      "main": [
+        [
+          {
+            "node": "Everhour: time (report)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Everhour: time (report)": {
+      "main": [
+        [
+          {
+            "node": "Format report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format report": {
+      "main": [
+        [
+          {
+            "node": "Send reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get invoice rows": {
+      "main": [
+        [
+          {
+            "node": "Decide invoice reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide invoice reminder": {
+      "main": [
+        [
+          {
+            "node": "Save invoice reminder",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send invoice reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get invoice rows (reply)": {
+      "main": [
+        [
+          {
+            "node": "Resolve invoice",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve invoice": {
+      "main": [
+        [
+          {
+            "node": "Invoice to save?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invoice to save?": {
+      "main": [
+        [
+          {
+            "node": "Save invoice issued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Warsaw",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  }
+}
