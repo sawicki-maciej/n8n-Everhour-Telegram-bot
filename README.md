@@ -14,6 +14,16 @@ Workflow n8n, który sprawdza, czy poprzedni dzień roboczy ma wpisane godziny w
 
 Jeden workflow obsługuje jedną osobę: jeden klucz API Everhoura, jeden bot, jeden czat. Każdy stawia własną kopię.
 
+## Jak to wygląda
+
+<p>
+  <img src="docs/img/reminder-and-logging.png" width="270" alt="Przypomnienie o brakujących godzinach i wpis godzin z Telegrama">
+  <img src="docs/img/which-day-and-week.png" width="270" alt="Wpis godzin bez przypomnienia i podsumowanie tygodnia">
+  <img src="docs/img/invoice-reminder.png" width="270" alt="Przypomnienie o fakturze z przyciskami">
+</p>
+
+Od lewej: przypomnienie i wpis godzin, wpis bez przypomnienia z podsumowaniem tygodnia, przypomnienie o fakturze. Nazwy tasków na zrzutach są przykładowe.
+
 ## Wymagania
 
 - n8n z funkcją Data tables (n8n Cloud albo self-hosted z publicznym adresem HTTPS, którego wymaga Telegram Trigger).
