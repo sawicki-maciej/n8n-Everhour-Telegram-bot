@@ -2,7 +2,7 @@
 
 Workflow n8n, który sprawdza, czy poprzedni dzień roboczy ma wpisane godziny w [Everhourze](https://everhour.com), przypomina o brakach na Telegramie i wpisuje godziny za Ciebie, gdy odpiszesz liczbą. Do tego raport tygodniowy i miesięczny oraz przypomnienie o fakturze na koniec miesiąca.
 
-*An n8n workflow that reminds you on Telegram about missing Everhour time entries and logs the hours you reply with. The bot talks Polish.*
+*An n8n workflow that reminds you on Telegram about missing Everhour time entries and logs the hours you reply with. The bot talks Polish. [English README](README.en.md).*
 
 ## Co robi
 
